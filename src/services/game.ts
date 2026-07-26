@@ -13,7 +13,7 @@ import {
 
 const MINIMAX_DEPTH = 2;
 /** プレイヤー向けヒントの探索深さ（CPU より 1 手深く読む） */
-const HINT_MINIMAX_DEPTH = 3;
+const HINT_MINIMAX_DEPTH = 4;
 
 /** 空盤面を生成 */
 export function createEmptyBoard(): Board {
