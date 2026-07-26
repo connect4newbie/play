@@ -233,6 +233,102 @@ export function evaluateBoard(board: Board, piece: Player): number {
   return score;
 }
 
+// ── リーチ検出（表示用）────────────────────────────────
+
+/** 4 連一歩手前の空きセル（owner がその一手で勝てる） */
+export type ThreatCell = {
+  col: number;
+  row: number;
+  owner: Player;
+};
+
+/**
+ * 3 連 + 空き 1 の窓から、リーチ空きセルを返す（空中の論理リーチも含む）。
+ * 同一マスが双方リーチのときは両方含む（UI 側で優先度を決めてよい）。
+ */
+export function findThreatCells(board: Board): ThreatCell[] {
+  type Pos = { col: number; row: number };
+  const candidates: { pos: Pos; owner: Player }[] = [];
+
+  const collectFromWindow = (cells: Pos[]) => {
+    for (const owner of [PLAYER, CPU] as Player[]) {
+      let own = 0;
+      let empty = 0;
+      let emptyPos: Pos | null = null;
+      for (const p of cells) {
+        const v = board[p.col][p.row];
+        if (v === owner) own++;
+        else if (v === EMPTY) {
+          empty++;
+          emptyPos = p;
+        }
+      }
+      if (own === 3 && empty === 1 && emptyPos) {
+        candidates.push({ pos: emptyPos, owner });
+      }
+    }
+  };
+
+  // 横
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS - 3; col++) {
+      collectFromWindow([
+        { col, row },
+        { col: col + 1, row },
+        { col: col + 2, row },
+        { col: col + 3, row },
+      ]);
+    }
+  }
+
+  // 縦
+  for (let col = 0; col < COLS; col++) {
+    for (let row = 0; row < ROWS - 3; row++) {
+      collectFromWindow([
+        { col, row },
+        { col, row: row + 1 },
+        { col, row: row + 2 },
+        { col, row: row + 3 },
+      ]);
+    }
+  }
+
+  // 右斜め上
+  for (let col = 0; col < COLS - 3; col++) {
+    for (let row = 0; row < ROWS - 3; row++) {
+      collectFromWindow([
+        { col, row },
+        { col: col + 1, row: row + 1 },
+        { col: col + 2, row: row + 2 },
+        { col: col + 3, row: row + 3 },
+      ]);
+    }
+  }
+
+  // 右斜め下
+  for (let col = 0; col < COLS - 3; col++) {
+    for (let row = 3; row < ROWS; row++) {
+      collectFromWindow([
+        { col, row },
+        { col: col + 1, row: row - 1 },
+        { col: col + 2, row: row - 2 },
+        { col: col + 3, row: row - 3 },
+      ]);
+    }
+  }
+
+  // 重複除去（論理リーチは空中も含む）
+  const seen = new Set<string>();
+  const result: ThreatCell[] = [];
+  for (const { pos, owner } of candidates) {
+    const key = `${pos.col},${pos.row},${owner}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ col: pos.col, row: pos.row, owner });
+  }
+  return result;
+}
+
 // ── ミニマックス ──────────────────────────────────────
 
 function isTerminal(board: Board): boolean {

@@ -1,7 +1,7 @@
 import type { FC } from "hono/jsx";
-import { COLS, ROWS } from "../types";
-import type { Board, GameStatus } from "../types";
-import { serializeBoard } from "../services/game";
+import { COLS, CPU, EMPTY, PLAYER, ROWS } from "../types";
+import type { Board, GameStatus, Player } from "../types";
+import { findThreatCells, serializeBoard } from "../services/game";
 
 export type BoardPageProps = {
   board: Board;
@@ -35,10 +35,41 @@ function statusClass(status: GameStatus): string {
   }
 }
 
-function cellClass(value: 0 | 1 | 2): string {
+function cellClass(value: 0 | 1 | 2, threatOwner: Player | null): string {
   if (value === 1) return "bg-[#ef4444] shadow-inner";
   if (value === 2) return "bg-[#facc15] shadow-inner";
+  if (threatOwner === PLAYER) {
+    return "bg-red-400/40 ring-2 ring-red-500 ring-offset-1 ring-offset-sky-800";
+  }
+  if (threatOwner === CPU) {
+    return "bg-amber-300/50 ring-2 ring-amber-500 ring-offset-1 ring-offset-sky-800";
+  }
   return "bg-slate-100 border border-slate-200";
+}
+
+function emptyAriaLabel(threatOwner: Player | null): string {
+  if (threatOwner === PLAYER) return "空き（あなたのリーチ）";
+  if (threatOwner === CPU) return "空き（CPU のリーチ）";
+  return "空き";
+}
+
+/** 列ボタン: プレイヤー勝ち > CPU ブロック > 通常 */
+function columnButtonClass(threat: Player | null): string {
+  const base =
+    "flex h-9 items-center justify-center rounded-lg text-sm font-semibold text-white transition";
+  if (threat === PLAYER) {
+    return `${base} bg-red-600 hover:bg-red-500 active:bg-red-700`;
+  }
+  if (threat === CPU) {
+    return `${base} bg-amber-500 hover:bg-amber-400 active:bg-amber-600`;
+  }
+  return `${base} bg-sky-600 hover:bg-sky-500 active:bg-sky-800`;
+}
+
+function columnAriaLabel(col: number, threat: Player | null): string {
+  if (threat === PLAYER) return `列 ${col + 1} に置く（あなたのリーチ）`;
+  if (threat === CPU) return `列 ${col + 1} に置く（CPU のリーチ・要ブロック）`;
+  return `列 ${col + 1} に置く`;
 }
 
 export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
@@ -48,6 +79,34 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
   // 表示は上から下（row ROWS-1 → 0）
   const displayRows: number[] = [];
   for (let r = ROWS - 1; r >= 0; r--) displayRows.push(r);
+
+  // 論理リーチ（空中含む）。同一マスはプレイヤー優先。
+  // 列ボタンは「今そこに置くとリーチが埋まる」列のみ色付けする。
+  const threatByCell = new Map<string, Player>();
+  const threatByCol = new Map<number, Player>();
+  if (playing) {
+    const dropRowOf = (col: number): number | null => {
+      for (let row = 0; row < ROWS; row++) {
+        if (board[col][row] === EMPTY) return row;
+      }
+      return null;
+    };
+
+    for (const t of findThreatCells(board)) {
+      const key = `${t.col},${t.row}`;
+      const existing = threatByCell.get(key);
+      if (!existing || t.owner === PLAYER) {
+        threatByCell.set(key, t.owner);
+      }
+      // 列ボタン: その列の次の落下行がリーチ空きと一致するときだけ
+      if (dropRowOf(t.col) === t.row) {
+        const colExisting = threatByCol.get(t.col);
+        if (!colExisting || t.owner === PLAYER) {
+          threatByCol.set(t.col, t.owner);
+        }
+      }
+    }
+  }
 
   return (
     <html lang="ja">
@@ -94,7 +153,7 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
               </div>
             ) : null}
 
-            <div class="mb-3 flex items-center justify-center gap-4 text-xs text-slate-500">
+            <div class="mb-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs text-slate-500">
               <span class="inline-flex items-center gap-1.5">
                 <span class="inline-block h-3 w-3 rounded-full bg-[#ef4444]" />
                 あなた
@@ -102,6 +161,14 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
               <span class="inline-flex items-center gap-1.5">
                 <span class="inline-block h-3 w-3 rounded-full bg-[#facc15]" />
                 CPU
+              </span>
+              <span class="inline-flex items-center gap-1.5">
+                <span class="inline-block h-3 w-3 rounded-full bg-red-400/40 ring-1 ring-red-500" />
+                あなたのリーチ
+              </span>
+              <span class="inline-flex items-center gap-1.5">
+                <span class="inline-block h-3 w-3 rounded-full bg-amber-300/50 ring-1 ring-amber-500" />
+                CPU のリーチ
               </span>
             </div>
 
@@ -112,15 +179,16 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
                 class="mb-1 grid gap-1"
                 style={`grid-template-columns: repeat(${COLS}, minmax(0, 1fr));`}
               >
-                {Array.from({ length: COLS }, (_, col) =>
-                  playing ? (
+                {Array.from({ length: COLS }, (_, col) => {
+                  const colThreat = threatByCol.get(col) ?? null;
+                  return playing ? (
                     <form method="post" action="/move" class="contents">
                       <input type="hidden" name="column" value={String(col)} />
                       <input type="hidden" name="board" value={boardJson} />
                       <button
                         type="submit"
-                        class="flex h-9 items-center justify-center rounded-lg bg-sky-600 text-sm font-semibold text-white transition hover:bg-sky-500 active:bg-sky-800"
-                        aria-label={`列 ${col + 1} に置く`}
+                        class={columnButtonClass(colThreat)}
+                        aria-label={columnAriaLabel(col, colThreat)}
                       >
                         ↓
                       </button>
@@ -129,8 +197,8 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
                     <div class="flex h-9 items-center justify-center rounded-lg bg-sky-800/50 text-sm text-sky-300/50">
                       ↓
                     </div>
-                  ),
-                )}
+                  );
+                })}
               </div>
 
               {/* セルグリッド */}
@@ -141,15 +209,19 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
                 {displayRows.flatMap((row) =>
                   Array.from({ length: COLS }, (_, col) => {
                     const value = board[col][row];
+                    const threatOwner =
+                      value === 0
+                        ? (threatByCell.get(`${col},${row}`) ?? null)
+                        : null;
                     return (
                       <div
-                        class={`aspect-square w-full rounded-full ${cellClass(value)}`}
+                        class={`aspect-square w-full rounded-full ${cellClass(value, threatOwner)}`}
                         aria-label={
                           value === 1
                             ? "プレイヤー"
                             : value === 2
                               ? "CPU"
-                              : "空き"
+                              : emptyAriaLabel(threatOwner)
                         }
                       />
                     );
