@@ -3,7 +3,13 @@
 Cloudflare Workers + Hono で動く、シングルプレイの Connect4 です。  
 対戦相手は低難易度 CPU（ミニマックス深さ 2）。ランキングや永続化はありません。
 
-仕様の詳細: [`spec.md`](./spec.md)
+| | |
+|--|--|
+| **本番 URL** | [https://play.connect4.workers.dev/](https://play.connect4.workers.dev/) |
+| **リポジトリ** | [https://github.com/connect4newbie/play](https://github.com/connect4newbie/play) |
+
+仕様の詳細: [`spec.md`](./spec.md)  
+Cloudflare セットアップ: [`README_cloudflare.md`](./README_cloudflare.md)
 
 ## 技術スタック
 
@@ -25,6 +31,8 @@ Cloudflare Workers + Hono で動く、シングルプレイの Connect4 です�
 ## セットアップ
 
 ```bash
+git clone https://github.com/connect4newbie/play.git
+cd play
 npm install
 ```
 
@@ -42,6 +50,14 @@ npm run dev   # wrangler dev
 npx wrangler login
 npx wrangler deploy
 ```
+
+成功すると本番は次の URL になります。
+
+```text
+https://play.connect4.workers.dev/
+```
+
+詳細手順は [`README_cloudflare.md`](./README_cloudflare.md) を参照してください。
 
 ## 遊び方
 
