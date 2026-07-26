@@ -1,7 +1,11 @@
 import type { FC } from "hono/jsx";
 import { COLS, CPU, EMPTY, PLAYER, ROWS } from "../types";
 import type { Board, GameStatus, Player } from "../types";
-import { findThreatCells, serializeBoard } from "../services/game";
+import {
+  choosePlayerHint,
+  findThreatCells,
+  serializeBoard,
+} from "../services/game";
 
 export type BoardPageProps = {
   board: Board;
@@ -9,7 +13,7 @@ export type BoardPageProps = {
   error?: string;
 };
 
-function statusMessage(status: GameStatus): string {
+function statusMessage(status: GameStatus, hintCol: number | null): string {
   switch (status) {
     case "player_win":
       return "あなたの勝ち！";
@@ -18,6 +22,9 @@ function statusMessage(status: GameStatus): string {
     case "draw":
       return "引き分け";
     default:
+      if (hintCol !== null) {
+        return `あなたの番 — おすすめ: 列 ${hintCol + 1}`;
+      }
       return "あなたの番 — 列を選んでください";
   }
 }
@@ -35,41 +42,84 @@ function statusClass(status: GameStatus): string {
   }
 }
 
-function cellClass(value: 0 | 1 | 2, threatOwner: Player | null): string {
+/**
+ * 空きセルの見た目。
+ * 優先: 自分リーチ(赤) > ヒント(インディゴ) > CPUリーチ(黄)
+ * ヒントとリーチが重なるときは fill をリーチ色、外側リングをインディゴに。
+ */
+function cellClass(
+  value: 0 | 1 | 2,
+  threatOwner: Player | null,
+  isHint: boolean,
+): string {
   if (value === 1) return "bg-[#ef4444] shadow-inner";
   if (value === 2) return "bg-[#facc15] shadow-inner";
+
   if (threatOwner === PLAYER) {
-    return "bg-red-400/40 ring-2 ring-red-500 ring-offset-1 ring-offset-sky-800";
+    return isHint
+      ? "bg-red-400/40 ring-2 ring-indigo-400 ring-offset-2 ring-offset-sky-800"
+      : "bg-red-400/40 ring-2 ring-red-500 ring-offset-1 ring-offset-sky-800";
   }
   if (threatOwner === CPU) {
-    return "bg-amber-300/50 ring-2 ring-amber-500 ring-offset-1 ring-offset-sky-800";
+    return isHint
+      ? "bg-amber-300/50 ring-2 ring-indigo-400 ring-offset-2 ring-offset-sky-800"
+      : "bg-amber-300/50 ring-2 ring-amber-500 ring-offset-1 ring-offset-sky-800";
+  }
+  if (isHint) {
+    return "bg-indigo-300/35 ring-2 ring-dashed ring-indigo-400 ring-offset-1 ring-offset-sky-800";
   }
   return "bg-slate-100 border border-slate-200";
 }
 
-function emptyAriaLabel(threatOwner: Player | null): string {
-  if (threatOwner === PLAYER) return "空き（あなたのリーチ）";
-  if (threatOwner === CPU) return "空き（CPU のリーチ）";
-  return "空き";
+function emptyAriaLabel(
+  threatOwner: Player | null,
+  isHint: boolean,
+): string {
+  const parts: string[] = ["空き"];
+  if (isHint) parts.push("おすすめの手");
+  if (threatOwner === PLAYER) parts.push("あなたのリーチ");
+  if (threatOwner === CPU) parts.push("CPU のリーチ");
+  if (parts.length === 1) return "空き";
+  return `${parts[0]}（${parts.slice(1).join("・")}）`;
 }
 
-/** 列ボタン: プレイヤー勝ち > CPU ブロック > 通常 */
-function columnButtonClass(threat: Player | null): string {
+/** 列ボタン: ヒント時は ★。色はリーチ優先、ヒントのみならインディゴ */
+function columnButtonClass(
+  threat: Player | null,
+  isHint: boolean,
+): string {
   const base =
     "flex h-9 items-center justify-center rounded-lg text-sm font-semibold text-white transition";
   if (threat === PLAYER) {
-    return `${base} bg-red-600 hover:bg-red-500 active:bg-red-700`;
+    return `${base} bg-red-600 hover:bg-red-500 active:bg-red-700${isHint ? " ring-2 ring-white/80" : ""}`;
   }
   if (threat === CPU) {
-    return `${base} bg-amber-500 hover:bg-amber-400 active:bg-amber-600`;
+    return `${base} bg-amber-500 hover:bg-amber-400 active:bg-amber-600${isHint ? " ring-2 ring-white/80" : ""}`;
+  }
+  if (isHint) {
+    return `${base} bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 ring-2 ring-white/70`;
   }
   return `${base} bg-sky-600 hover:bg-sky-500 active:bg-sky-800`;
 }
 
-function columnAriaLabel(col: number, threat: Player | null): string {
-  if (threat === PLAYER) return `列 ${col + 1} に置く（あなたのリーチ）`;
-  if (threat === CPU) return `列 ${col + 1} に置く（CPU のリーチ・要ブロック）`;
-  return `列 ${col + 1} に置く`;
+function columnAriaLabel(
+  col: number,
+  threat: Player | null,
+  isHint: boolean,
+): string {
+  const tags: string[] = [];
+  if (isHint) tags.push("おすすめ");
+  if (threat === PLAYER) tags.push("あなたのリーチ");
+  if (threat === CPU) tags.push("CPU のリーチ・要ブロック");
+  if (tags.length === 0) return `列 ${col + 1} に置く`;
+  return `列 ${col + 1} に置く（${tags.join("・")}）`;
+}
+
+function dropRowOf(board: Board, col: number): number | null {
+  for (let row = 0; row < ROWS; row++) {
+    if (board[col][row] === EMPTY) return row;
+  }
+  return null;
 }
 
 export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
@@ -84,28 +134,26 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
   // 列ボタンは「今そこに置くとリーチが埋まる」列のみ色付けする。
   const threatByCell = new Map<string, Player>();
   const threatByCol = new Map<number, Player>();
-  if (playing) {
-    const dropRowOf = (col: number): number | null => {
-      for (let row = 0; row < ROWS; row++) {
-        if (board[col][row] === EMPTY) return row;
-      }
-      return null;
-    };
+  let hintCol: number | null = null;
+  let hintRow: number | null = null;
 
+  if (playing) {
     for (const t of findThreatCells(board)) {
       const key = `${t.col},${t.row}`;
       const existing = threatByCell.get(key);
       if (!existing || t.owner === PLAYER) {
         threatByCell.set(key, t.owner);
       }
-      // 列ボタン: その列の次の落下行がリーチ空きと一致するときだけ
-      if (dropRowOf(t.col) === t.row) {
+      if (dropRowOf(board, t.col) === t.row) {
         const colExisting = threatByCol.get(t.col);
         if (!colExisting || t.owner === PLAYER) {
           threatByCol.set(t.col, t.owner);
         }
       }
     }
+
+    hintCol = choosePlayerHint(board);
+    hintRow = dropRowOf(board, hintCol);
   }
 
   return (
@@ -141,7 +189,7 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
               class={`mb-4 rounded-2xl border px-4 py-3 text-sm font-medium ${statusClass(status)}`}
               role="status"
             >
-              {statusMessage(status)}
+              {statusMessage(status, hintCol)}
             </div>
 
             {error ? (
@@ -170,6 +218,10 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
                 <span class="inline-block h-3 w-3 rounded-full bg-amber-300/50 ring-1 ring-amber-500" />
                 CPU のリーチ
               </span>
+              <span class="inline-flex items-center gap-1.5">
+                <span class="inline-block h-3 w-3 rounded-full bg-indigo-300/40 ring-1 ring-dashed ring-indigo-400" />
+                おすすめ
+              </span>
             </div>
 
             {/* 列ボタン + 盤面 */}
@@ -181,16 +233,17 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
               >
                 {Array.from({ length: COLS }, (_, col) => {
                   const colThreat = threatByCol.get(col) ?? null;
+                  const isHint = hintCol === col;
                   return playing ? (
                     <form method="post" action="/move" class="contents">
                       <input type="hidden" name="column" value={String(col)} />
                       <input type="hidden" name="board" value={boardJson} />
                       <button
                         type="submit"
-                        class={columnButtonClass(colThreat)}
-                        aria-label={columnAriaLabel(col, colThreat)}
+                        class={columnButtonClass(colThreat, isHint)}
+                        aria-label={columnAriaLabel(col, colThreat, isHint)}
                       >
-                        ↓
+                        {isHint ? "★" : "↓"}
                       </button>
                     </form>
                   ) : (
@@ -210,18 +263,22 @@ export const BoardPage: FC<BoardPageProps> = ({ board, status, error }) => {
                   Array.from({ length: COLS }, (_, col) => {
                     const value = board[col][row];
                     const threatOwner =
-                      value === 0
+                      value === EMPTY
                         ? (threatByCell.get(`${col},${row}`) ?? null)
                         : null;
+                    const isHint =
+                      value === EMPTY &&
+                      hintCol === col &&
+                      hintRow === row;
                     return (
                       <div
-                        class={`aspect-square w-full rounded-full ${cellClass(value, threatOwner)}`}
+                        class={`aspect-square w-full rounded-full ${cellClass(value, threatOwner, isHint)}`}
                         aria-label={
                           value === 1
                             ? "プレイヤー"
                             : value === 2
                               ? "CPU"
-                              : emptyAriaLabel(threatOwner)
+                              : emptyAriaLabel(threatOwner, isHint)
                         }
                       />
                     );

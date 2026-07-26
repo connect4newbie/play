@@ -12,6 +12,8 @@ import {
 } from "../types";
 
 const MINIMAX_DEPTH = 2;
+/** プレイヤー向けヒントの探索深さ（CPU より 1 手深く読む） */
+const HINT_MINIMAX_DEPTH = 3;
 
 /** 空盤面を生成 */
 export function createEmptyBoard(): Board {
@@ -411,6 +413,53 @@ export function chooseCpuMove(board: Board): number {
   }
 
   const [, bestCol] = minimax(board, MINIMAX_DEPTH, true);
+  if (bestCol < 0 || isColumnFull(board, bestCol)) {
+    return valid[0];
+  }
+  return bestCol;
+}
+
+/**
+ * プレイヤーへの推奨列（ヒント）。
+ * 1. 即勝利できる列があればそこに置く
+ * 2. なければ深さ 3 のミニマックス（CPU 視点スコアを最小化する手）
+ * 同点時は中央寄りを優先。
+ */
+export function choosePlayerHint(board: Board): number {
+  const valid = getValidColumns(board);
+  if (valid.length === 0) {
+    throw new Error("合法手がない状態でヒントが呼ばれました");
+  }
+
+  // 短絡: 即勝利
+  for (const col of valid) {
+    const next = dropPiece(board, col, PLAYER);
+    if (next && checkWinner(next) === PLAYER) {
+      return col;
+    }
+  }
+
+  // 探索順: 中央寄り（同点時の手を安定させる）
+  const ordered = [...valid].sort(
+    (a, b) => Math.abs(a - 3) - Math.abs(b - 3),
+  );
+
+  let bestCol = ordered[0] ?? valid[0];
+  let bestScore = Infinity;
+
+  // プレイヤーが 1 手打ったあと、残り深さで CPU 視点の minimax
+  const remainingDepth = HINT_MINIMAX_DEPTH - 1;
+  for (const col of ordered) {
+    const next = dropPiece(board, col, PLAYER);
+    if (!next) continue;
+    const [score] = minimax(next, remainingDepth, true);
+    // 現行評価は CPU 視点なので、プレイヤーはスコア最小を選ぶ
+    if (score < bestScore) {
+      bestScore = score;
+      bestCol = col;
+    }
+  }
+
   if (bestCol < 0 || isColumnFull(board, bestCol)) {
     return valid[0];
   }
