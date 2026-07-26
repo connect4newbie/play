@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# wrangler
+.wrangler/
+
+# git
+.git/
+
+# logs
+*.log
+
+# build output
+dist/
+coverage/
+
+# secrets
+.env
+.env.local
