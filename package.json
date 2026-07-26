@@ -1,0 +1,19 @@
+{
+  "name": "play",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.7.10"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260708.1",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.16.1"
+  }
+}
